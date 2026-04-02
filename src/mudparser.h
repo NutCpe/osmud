@@ -113,6 +113,22 @@
 #define UPPER_PORT "upper-port"
 #define LOWER_PORT "lower-port"
 #define FORWARDING "forwarding"
+
+#define SYN_RATE "syn-packet-rate"
+#define SYN_BURST "syn-burst-rate"
+#define MAX_SESSION "concurrent-session-limit"
+#define CONN_ATTEMPT "reconnection-limit"
+#define ATTEMPT_TIME "reconnection-interval"
+// TCP FIN extensions
+#define FIN_RATE "fin-packet-rate"
+#define FIN_BURST "fin-burst-rate"
+// TCP RST extensions
+#define RST_RATE "rst-packet-rate"
+#define RST_BURST "rst-burst-rate"
+// Extensions for UDP ACEs
+#define UDP_RATE "udp-packet-rate"
+#define UDP_BURST "udp-burst-rate"
+
 #define IETF_MUD_ACL "ietf-mud:mud-acl"
 
 // description
@@ -155,6 +171,17 @@ typedef struct {
 	char *upperPort;
 	char *actionsForwarding;
 	char *directionInitiated;
+	char *udpRate;  //maximum packet rate per second
+	char *udpRate;  //maximum burst rate
+	char *synRate; //maximum SYN packet rate per second
+	char *synBurst;  //maximum SYN packet burst rate
+	char *maxSession;
+	char *connAttempt;
+	char *attemptTime;
+	char *finRate;
+	char *finBurst;
+	char *rstRate;
+	char *rstBurst;
 } AceEntry;
 
 typedef struct {
