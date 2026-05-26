@@ -113,6 +113,19 @@
 #define UPPER_PORT "upper-port"
 #define LOWER_PORT "lower-port"
 #define FORWARDING "forwarding"
+// TCP SYN extensions
+#define SYN_PACKETRATE "syn-packet-rate" //Maximum SYN packet rate
+#define SYN_BURSTRATE "syn-burst-rate" //Maximum SYN packet burst rate
+// TCP FIN extensions
+#define FIN_PACKETRATE "fin-packet-rate"
+#define FIN_BURSTRATE "fin-burst-rate"
+// TCP RST extensions
+#define RST_PACKETRATE "rst-packet-rate"
+#define RST_BURSTRATE "rst-burst-rate"
+// Extensions for UDP ACEs
+#define UDP_PACKETRATE "udp-packet-rate" //Maximum packet rate for UDP-based ACEs
+#define UDP_BURSTRATE "udp-burst-rate" //Maximum packet burst rate for UDP-based ACEs
+
 #define IETF_MUD_ACL "ietf-mud:mud-acl"
 
 // description
@@ -155,6 +168,15 @@ typedef struct {
 	char *upperPort;
 	char *actionsForwarding;
 	char *directionInitiated;
+	// Add new fields for proposed extension
+	char *udpRate;
+	char *udpBurst;
+	char *synRate;
+	char *synBurst;
+	char *finRate;
+	char *finBurst;
+	char *rstRate;
+	char *rstBurst;
 } AceEntry;
 
 typedef struct {
