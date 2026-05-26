@@ -117,9 +117,9 @@ void process_string(char *key, json_object *val, char *context, MudFileInfo *mfi
         }
 		// Add SYN, FIN, RST, and UDP extension keywords detection
         else if (!strcmp(key, UDP_PACKETRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].packetRate = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpRate = copystring(json_object_get_string(val));
         } else if (!strcmp(key, UDP_BURSTRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].burstRate = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpBurst = copystring(json_object_get_string(val));
         } else if (!strcmp(key, SYN_PACKETRATE)) {
             mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synRate = copystring(json_object_get_string(val));
         } else if (!strcmp(key, SYN_BURSTRATE)) {
