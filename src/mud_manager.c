@@ -94,15 +94,87 @@ int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *ev
     		// Need to install a firewall rule for each IP that resolves
     		for (j = 0; j < dnsInfo->ipCount; j++) {
     			buildPortRange(portRangeBuffer, PORT_BUF_SIZE, &(acl->aceList[i]));
-    			actionResult = installFirewallIPRule(event->ipAddress,
-    													dnsInfo->ipList[j],
-														portRangeBuffer,
-														LAN_DEVICE_NAME,
-														WAN_DEVICE_NAME,
-														acl->aceList[i].protocol,
-														acl->aceList[i].ruleName,
-														acl->aceList[i].actionsForwarding,
-														aclType, event->hostName);
+				
+    			if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "6")) {
+						
+						// Process TCP ACEs
+						// Detect newly added extensions
+						if (acl->aceList[i].synRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synRate);
+						}
+						if (acl->aceList[i].synBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synBurst);
+						}
+						if (acl->aceList[i].finRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finRate);
+						}
+						if (acl->aceList[i].finBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finBurst);
+						}
+						if (acl->aceList[i].rstRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstRate);
+						}
+						if (acl->aceList[i].rstBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstBurst);
+						}
+					
+						// Call "installFirewallTCPRule" helper function to Enforced TCP ACL rules
+						// This helper function will then used by openwrt.c to call an actual shell script file for ACL rules enforcement
+						// Shell script for TCP ACL rules enforcement = "create_tcp_fw_rule.sh"
+						actionResult = installFirewallTCPRule(event->ipAddress,						/* srcIP */
+																dnsInfo->ipList[j],					/* destIP */
+																portRangeBuffer,					/* destport */
+																LAN_DEVICE_NAME,					/* srcDevice - lan or wan */
+																WAN_DEVICE_NAME,					/* destDevice - lan or wan */
+																acl->aceList[i].protocol,			/* protocol - tcp */
+																acl->aceList[i].synRate,			/* synRate */
+																acl->aceList[i].synBurst,			/* synBurst */
+																acl->aceList[i].finRate,			/* finRate */
+																acl->aceList[i].finBurst,			/* finBurst */
+																acl->aceList[i].rstRate,			/* rstRate */
+																acl->aceList[i].rstBurst,			/* rstBurst */
+																acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
+																acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
+																aclType, event->hostName			/* hostname of the new device */
+																);						
+					} else if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "17")) {
+						// Process UDP ACEs
+						// Detect newly added extensions
+						if(acl->aceList[i].udpRate) {  // Packet rate extension
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].udpRate);
+						}
+						if(acl->aceList[i].udpBurst) {  // Burst rate extension
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].udpBurst);
+						}
+						
+						// Call "installFirewallUCPRule" helper function to Enforced UDP ACL rules
+						// This helper function will then used by openwrt.c to call an actual shell script file for ACL rules enforcement
+						// Shell script for UCP ACL rules enforcement = "create_udp_fw_rule.sh"
+						actionResult = installFirewallUDPRule(event->ipAddress,						/* srcIP */
+																dnsInfo->ipList[j],					/* destIP */
+																portRangeBuffer,					/* destport */
+																LAN_DEVICE_NAME,					/* srcDevice - lan or wan */
+																WAN_DEVICE_NAME,					/* destDevice - lan or wan */
+																acl->aceList[i].protocol,			/* protocol - udp */
+																acl->aceList[i].udpRate,			/* udpRate */
+																acl->aceList[i].udpBurst,			/* udpBurst */
+																acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
+																acl->aceList[i].actionsForwarding, 	/* ACCEPT or REJECT */
+																aclType, event->hostName			/* hostname of the new device */);
+					} else {
+						// Non-TCP or UDP ACEs
+						// Currently, profile extension on non-TCP/UDP profile is not the focus (but can be included later)
+						// Shell script for UCP ACL rules enforcement = "create_ip_fw_rule.sh"
+						actionResult = installFirewallIPRule(event->ipAddress,						/* srcIP */
+																dnsInfo->ipList[j],					/* destIP */
+																portRangeBuffer,					/* destport */
+																LAN_DEVICE_NAME,					/* srcDevice - lan or wan */
+																WAN_DEVICE_NAME,					/* destDevice - lan or wan */
+																acl->aceList[i].protocol,			/* protocol - others */
+																acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
+																acl->aceList[i].actionsForwarding, 	/* ACCEPT or REJECT */
+																aclType, event->hostName			/* hostname of the new device */);
+					}
 				if (actionResult) {
 					logOmsGeneralMessage(OMS_CRIT, OMS_SUBSYS_DEVICE_INTERFACE, "Firewall rule installation failed");
 					actionResult = 0;
@@ -145,16 +217,80 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
     		// Need to install a firewall rule for each IP that resolves
     		for (j = 0; j < dnsInfo->ipCount; j++) {
     			buildPortRange(portRangeBuffer, PORT_BUF_SIZE, &(acl->aceList[i]));
-    			actionResult = installFirewallIPRule(dnsInfo->ipList[j], 					/* srcIp */
-    													event->ipAddress, 					/* destIp */
-														portRangeBuffer,		 			/* destPort */
-														WAN_DEVICE_NAME, 					/* srcDevice - lan or wan */
-														LAN_DEVICE_NAME,					/* destDevice - lan or wan */
-														acl->aceList[i].protocol, 			/* protocol - tcp/udp */
-														acl->aceList[i].ruleName, 			/* the name of the rule -- TODO: Better rule names by device name*/
-														acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
-														aclType,
-														event->hostName						/* hostname of the new device */ );
+				
+    			if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "6")) {
+
+					// Process TCP ACEs
+						// Detect newly added extensions
+						if (acl->aceList[i].synRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synRate);
+						}
+						if (acl->aceList[i].synBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synBurst);
+						}
+						if (acl->aceList[i].finRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finRate);
+						}
+						if (acl->aceList[i].finBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finBurst);
+						}
+						if (acl->aceList[i].rstRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstRate);
+						}
+						if (acl->aceList[i].rstBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstBurst);
+						}
+					
+						// Call "installFirewallTCPRule" helper function to Enforced TCP ACL rules
+						// This helper function will then used by openwrt.c to call an actual shell script file for ACL rules enforcement
+						// Shell script for TCP ACL rules enforcement = "create_tcp_fw_rule.sh"
+						actionResult = installFirewallTCPRule(event->ipAddress,						/* srcIP */
+																dnsInfo->ipList[j],					/* destIP */
+																portRangeBuffer,					/* destport */
+																WAN_DEVICE_NAME,					/* srcDevice - lan or wan */
+																LAN_DEVICE_NAME,					/* destDevice - lan or wan */
+																acl->aceList[i].protocol,			/* protocol - tcp */
+																acl->aceList[i].synRate,			/* synRate */
+																acl->aceList[i].synBurst,			/* synBurst */
+																acl->aceList[i].finRate,			/* finRate */
+																acl->aceList[i].finBurst,			/* finBurst */
+																acl->aceList[i].rstRate,			/* rstRate */
+																acl->aceList[i].rstBurst,			/* rstBurst */
+																acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
+																acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
+																aclType, event->hostName			/* hostname of the new device */
+																);						
+					} else if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "17")) {
+						if(acl->aceList[i].udpRate) {  // Packet rate extension
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].udpRate);
+						}
+						if(acl->aceList[i].udpBurst) {  // Burst rate extension
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].udpBurst);
+						}
+					// Install UDP "to-access" ACL rules
+					actionResult = installFirewallUDPRule(dnsInfo->ipList[j], 					/* srcIp */
+    														event->ipAddress, 					/* destIp */
+															portRangeBuffer,		 			/* destPort */
+															WAN_DEVICE_NAME, 					/* srcDevice - lan or wan */
+															LAN_DEVICE_NAME,					/* destDevice - lan or wan */
+															acl->aceList[i].protocol, 			/* protocol - tcp/udp */
+															acl->aceList[i].udpRate,			/* udpRate */
+															acl->aceList[i].udpBurst,			/* udpBurst */
+															acl->aceList[i].ruleName, 			/* the name of the rule -- TODO: Better rule names by device name*/
+															acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
+															aclType, event->hostName			/* hostname of the new device */ );
+				} else {
+					// Install non-TCP/UDP "to-access" ACL rules
+					actionResult = installFirewallIPRule(event->ipAddress,						/* srcIP */
+															dnsInfo->ipList[j],					/* destIP */
+															portRangeBuffer,					/* destport */
+															WAN_DEVICE_NAME,					/* srcDevice - lan or wan */
+															LAN_DEVICE_NAME,					/* destDevice - lan or wan */
+															acl->aceList[i].protocol,			/* protocol - others */
+															acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
+															acl->aceList[i].actionsForwarding, 	/* ACCEPT or REJECT */
+															aclType, event->hostName			/* hostname of the new device */);
+				}
 				if (actionResult) {
 					logOmsGeneralMessage(OMS_CRIT, OMS_SUBSYS_DEVICE_INTERFACE, "Firewall rule installation failed");
 					actionResult = 0;
@@ -216,6 +352,49 @@ int executeMudWithDhcpContext(DhcpEvent *dhcpEvent)
 		    		retval = 1;
 		    	}
 		    }
+
+		// Install TCP default rule to block all traffic from this IP address unless allowed in the MUD file
+			// ORDER MATTERS - this rule needs to be installed after all of the individual allow/deny rules
+			actionResult = installFirewallTCPRule(dhcpEvent->ipAddress,		/* srcIP */
+													"any",					/* destIP */
+													"any",					/* destPort */
+													LAN_DEVICE_NAME,		/* srcDevice - lan or wan */
+													WAN_DEVICE_NAME,		/* destDevice - lan or wan */
+													"all",					/* protocol - tcp */
+													"0",					/* synRate */
+													"0",					/* synBurst */													
+													"0",					/* finRate */
+													"0",					/* finBurst */
+													"0",					/* rstRate */
+													"0",					/* rstBurst */
+													"REJECT-TCP",			/* the name of the rule*/
+													"DENY",					/* ACCEPT or DENY */
+													"all",
+													dhcpEvent->hostName		/* hostname of the new device */
+												 	);
+			if (actionResult) {
+				logOmsGeneralMessage(OMS_CRIT, OMS_SUBSYS_DEVICE_INTERFACE, "Problems installing default TCP restrict rule.");
+				retval = 1;
+			}
+
+		    // Install UDP default rule to block all traffic from this IP address unless allowed in the MUD file
+		    // ORDER MATTERS - this rule needs to be installed after all of the individual allow/deny rules
+			actionResult = installFirewallUDPRule(dhcpEvent->ipAddress, 		/* srcIp */
+													"any", 					/* destIp */
+													"any",		 			/* destPort */
+													LAN_DEVICE_NAME, 		/* srcDevice - lan or wan */
+													WAN_DEVICE_NAME,		/* destDevice - lan or wan */
+													"all", 					/* protocol - udp */
+													"0", 					// udpRate
+													"0",					// udpBurst
+													"REJECT-UDP", 			/* the name of the rule -- TODO: Better rule names by device name*/
+													"DENY",					/* ACCEPT or DENY or REJECT */
+													"all",
+													dhcpEvent->hostName		/* hostname of the new device */ );
+			if (actionResult) {
+				logOmsGeneralMessage(OMS_CRIT, OMS_SUBSYS_DEVICE_INTERFACE, "Problems installing default UDP restrict rule.");
+				retval = 1;
+			}
 
 		    // Install default rule to block all traffic from this IP address unless allowed in the MUD file
 		    // ORDER MATTERS - this rule needs to be installed after all of the individual allow/deny rules
