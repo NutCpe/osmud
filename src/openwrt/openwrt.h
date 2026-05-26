@@ -17,6 +17,8 @@
 #define _OMS_OPENWRT
 
 #define UCI_FIREWALL_SCRIPT "/etc/osmud/create_ip_fw_rule.sh"
+#define TCP_FIREWALL_SCRIPT "/etc/osmud/create_tcp_fw_rule.sh"
+#define UDP_FIREWALL_SCRIPT "/etc/osmud/create_udp_fw_rule.sh"
 #define UCI_FIREWALL_REMOVE_SCRIPT "/etc/osmud/remove_ip_fw_rule.sh"
 
 #define MUD_DB_CREATE_SCRIPT "/etc/osmud/create_mud_db_entry.sh"
