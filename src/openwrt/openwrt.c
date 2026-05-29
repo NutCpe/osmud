@@ -111,6 +111,88 @@ int installFirewallIPRule(char *srcIp, char *destIp, char *destPort, char *srcDe
 	return retval;
 }
 
+int installFirewallUDPRule(char *srcIp, char *destIp, char *destPort, char *srcDevice, 
+	char *destDevice, char *protocol, char *udpRate, char *udpBurst, char *ruleName, 
+	char *fwAction, char *aclType, char *hostName)
+{
+	char execBuf[BUFSIZE];
+	int retval;
+
+	/* TODO: We need to turn srcDevice and destDevice into the real values on the router */
+	/*       by default they are "lan" and "wan" but can be changed. You can find this   */
+	/*       with command "uci show dhcp.lan.interface" ==> dhcp.lan.interface='lan'     */
+	/*       We should update the script to pull this value from UCI                     */
+	/*       EX: uci show dhcp.lan.interface | awk -F = '{print $2}'                     */
+	/* NOTE: Currently we are not restricting by source-port. If needed, add this as an arg */
+	snprintf(execBuf, BUFSIZE, "%s -s %s -d %s -i %s -a any -j %s -b %s -p %s -n %s -t %s -f %s -c %s -r %s -u %s", UDP_FIREWALL_SCRIPT, srcDevice, destDevice, srcIp,
+			destIp, destPort, getProtocolName(protocol),
+			ruleName,
+			getActionString(fwAction),
+			getProtocolFamily(aclType),
+			hostName, udpRate, udpBurst);
+	execBuf[BUFSIZE-1] = '\0';
+
+	logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_GENERAL, execBuf);
+	retval = system(execBuf);
+
+	if (retval) {
+		logOmsGeneralMessage(OMS_ERROR, OMS_SUBSYS_DEVICE_INTERFACE, execBuf);
+	}
+	return retval;
+}
+
+int installFirewallTCPRule(char *srcIp, char *destIp, char *destPort, char *srcDevice, 
+	char *destDevice, char *protocol, char *synRate, char *synBurst, char *finRate, char *finBurst, char *rstRate, char *rstBurst, char *ruleName, char *fwAction, 
+	char *aclType, char *hostName)
+{
+	char execBuf[BUFSIZE];
+    int retval;
+    int off = 0;           /* track bytes written */
+    int cap = BUFSIZE;     /* buffer capacity */
+
+	// This function is specific for TCP-based ACEs only.
+	// Further extension will be added later
+	off = snprintf(execBuf, BUFSIZE, "%s -s %s -d %s -i %s -a any -j %s -b %s -p %s -n %s -t %s -f %s -c %s", TCP_FIREWALL_SCRIPT, srcDevice, destDevice, srcIp,
+			destIp, destPort, getProtocolName(protocol),
+			ruleName,
+			getActionString(fwAction),
+			getProtocolFamily(aclType),
+			hostName);
+	execBuf[BUFSIZE-1] = '\0';
+
+	// Only add SYN monitor flags if requested
+    if (synRate && synRate[0] && off < BUFSIZE) {
+        off += snprintf(execBuf + off, BUFSIZE - off, " -r %s", synRate);
+    }
+    if (synBurst && synBurst[0] && off < BUFSIZE) {
+        off += snprintf(execBuf + off, BUFSIZE - off, " -u %s", synBurst);
+    }
+
+	// Only add FIN monitor flags if requested
+    if (finRate && finRate[0] && off < BUFSIZE) {
+        off += snprintf(execBuf + off, BUFSIZE - off, " -g %s", finRate);
+    }
+    if (finBurst && finBurst[0] && off < BUFSIZE) {
+        off += snprintf(execBuf + off, BUFSIZE - off, " -k %s", finBurst);
+    }
+
+	// Only add RST monitor flags if requested
+    if (rstRate && rstRate[0] && off < BUFSIZE) {
+        off += snprintf(execBuf + off, BUFSIZE - off, " -l %s", rstRate);
+    }
+    if (rstBurst && rstBurst[0] && off < BUFSIZE) {
+        off += snprintf(execBuf + off, BUFSIZE - off, " -q %s", rstBurst);
+    }
+
+	logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_GENERAL, execBuf);
+	retval = system(execBuf);
+
+	if (retval) {
+		logOmsGeneralMessage(OMS_ERROR, OMS_SUBSYS_DEVICE_INTERFACE, execBuf);
+	}
+	return retval;
+}
+
 int commitAndApplyFirewallRules()
 {
 	int retval;
