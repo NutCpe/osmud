@@ -115,6 +115,24 @@ void process_string(char *key, json_object *val, char *context, MudFileInfo *mfi
             mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].ruleName = copystring(json_object_get_string(val));
 */
         }
+		// Add SYN protection and SYN rate extension
+        else if (!strcmp(key, UDP_PACKETRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpRate = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, UDP_BURSTRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpBurst = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, SYN_PACKETRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synRate = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, SYN_BURSTRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synBurst = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, FIN_PACKETRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].finRate = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, FIN_BURSTRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].finBurst = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, RST_PACKETRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].rstRate = copystring(json_object_get_string(val));
+        } else if (!strcmp(key, RST_BURSTRATE)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].rstBurst = copystring(json_object_get_string(val));
+        }
 #ifdef DEBUG_OSMUD
         else {
             printf("in final else in mud-info strings\n");
@@ -256,6 +274,15 @@ void freeMudFileInfo(MudFileInfo *mfi) {
             safe_free(mfi->acls[i].aceList[j].protocol);
             safe_free(mfi->acls[i].aceList[j].ruleName);
             safe_free(mfi->acls[i].aceList[j].upperPort);
+			// new field for proposed extension 
+            safe_free(mfi->acls[i].aceList[j].udpRate);
+            safe_free(mfi->acls[i].aceList[j].udpBurst);
+            safe_free(mfi->acls[i].aceList[j].synRate);
+            safe_free(mfi->acls[i].aceList[j].synBurst);
+            safe_free(mfi->acls[i].aceList[j].finRate);
+            safe_free(mfi->acls[i].aceList[j].finBurst);
+            safe_free(mfi->acls[i].aceList[j].rstRate);
+            safe_free(mfi->acls[i].aceList[j].rstBurst);
         }
     }
 
@@ -306,6 +333,15 @@ MudFileInfo *createMfi() {
             mfi->acls[i].aceList[j].protocol = (char *)0;
             mfi->acls[i].aceList[j].ruleName = (char *)0;
             mfi->acls[i].aceList[j].upperPort = (char *)0;
+			 // new field for proposed extension
+            mfi->acls[i].aceList[j].udpRate = (char *)0;
+            mfi->acls[i].aceList[j].udpBurst = (char *)0;
+            mfi->acls[i].aceList[j].synRate = (char *)0;
+            mfi->acls[i].aceList[j].synBurst = (char *)0;
+            mfi->acls[i].aceList[j].finRate = (char *)0;
+            mfi->acls[i].aceList[j].finBurst = (char *)0;
+            mfi->acls[i].aceList[j].rstRate = (char *)0;
+            mfi->acls[i].aceList[j].rstBurst = (char *)0;
         }
     }
 
