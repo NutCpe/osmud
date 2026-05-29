@@ -45,6 +45,8 @@ extern char *osMudLogFile;
 
 /* These prototypes are intended to be implemented by a device specific implementation and not in the mud manager */
 int installFirewallIPRule(char *srcIp, char *destIp, char *destPort, char *srcDevice, char *destDevice, char *protocol, char *ruleName, char *fwAction, char *aclType, char* hostName);
+int installFirewallUDPRule(char *srcIp, char *destIp, char *destPort, char *srcDevice, char *destDevice, char *protocol, char *udpRate, char *udpBurst, char *ruleName, char *fwAction, char *aclType, char* hostName);
+int installFirewallTCPRule(char *srcIp, char *destIp, char *destPort, char *srcDevice, char *destDevice, char *protocol, char *synRate, char *synBurst, char *finRate, char *finBurst, char *rstRate, char *rstBurst, char *ruleName, char *fwAction, char *aclType, char* hostName);
 int removeFirewallIPRule(char *ipAddr, char *macAddress);
 int installMudDbDeviceEntry(char *mudDbDir, char *ipAddr, char *macAddress, char *mudUrl, char *mudLocalFile, char *hostName);
 int removeMudDbDeviceEntry(char *mudDbDir, char *ipAddr, char *macAddress);
