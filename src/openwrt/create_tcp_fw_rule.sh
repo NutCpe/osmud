@@ -173,8 +173,6 @@ HL_SYN="hs_${SRC_LAST}_${DEST_PORT}"
 HL_FIN="hf_${SRC_LAST}_${DEST_PORT}"
 HL_RST="hr_${SRC_LAST}_${DEST_PORT}"
 
-HOOK_ZONE="zone_${SRC}_forward"
-
 if ! grep -q '### OSMUD_TCP_GUARD INIT ###' "$HOOK_FILE"; then
 cat >> "$HOOK_FILE" <<'EOF'
 ### OSMUD_TCP_GUARD INIT ###
@@ -197,6 +195,17 @@ ensure_chain_return() {
     CHAIN="$1"
     $IPT -C "$CHAIN" -j RETURN 2>/dev/null || $IPT -A "$CHAIN" -j RETURN
 }
+
+# Inspect TCP control flags before fw3's general RELATED,ESTABLISHED ACCEPT.
+# These three shared hooks are installed once, rather than once per ACE tuple.
+$IPT -C forwarding_rule -p tcp --syn -j OSMUD_TCP_GUARD 2>/dev/null || \
+    ipt_before_return forwarding_rule -p tcp --syn -j OSMUD_TCP_GUARD
+
+$IPT -C forwarding_rule -p tcp --tcp-flags FIN FIN -j OSMUD_TCP_GUARD 2>/dev/null || \
+    ipt_before_return forwarding_rule -p tcp --tcp-flags FIN FIN -j OSMUD_TCP_GUARD
+
+$IPT -C forwarding_rule -p tcp --tcp-flags RST RST -j OSMUD_TCP_GUARD 2>/dev/null || \
+    ipt_before_return forwarding_rule -p tcp --tcp-flags RST RST -j OSMUD_TCP_GUARD
 EOF
 fi
 
@@ -207,10 +216,6 @@ cat >> "$HOOK_FILE" <<EOF
 # Tuple: $SRC_IP -> $DEST_IP:$DEST_PORT
 # =======================================
 IPT=\${IPT:-/usr/sbin/iptables}
-
-# 0) Hook guard from fw3 zone chain
-\$IPT -C ${HOOK_ZONE} -p tcp -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} -j OSMUD_TCP_GUARD 2>/dev/null || \
-  \$IPT -I ${HOOK_ZONE} 1 -p tcp -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} -j OSMUD_TCP_GUARD
 
 # 1) Ensure device chain + subchains exist
 \$IPT -nL "${CH_DEV}" >/dev/null 2>&1 || \$IPT -N "${CH_DEV}"
@@ -223,15 +228,22 @@ IPT=\${IPT:-/usr/sbin/iptables}
   ipt_before_return OSMUD_TCP_GUARD -p tcp -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} -j "${CH_DEV}"
 
 # 3) Device chain ordering
-# SYN NEW -> connlimit -> recent -> FIN -> RST -> RETURN
+# SYN NEW -> invalid FIN drop -> established FIN limit ->
+# invalid RST drop -> established RST limit -> RETURN
 \$IPT -C "${CH_DEV}" -p tcp --syn -m conntrack --ctstate NEW -j "${CH_SYN}" 2>/dev/null || \
   ipt_before_return "${CH_DEV}" -p tcp --syn -m conntrack --ctstate NEW -j "${CH_SYN}"
 
-\$IPT -C "${CH_DEV}" -p tcp --tcp-flags FIN FIN -j "${CH_FIN}" 2>/dev/null || \
-  ipt_before_return "${CH_DEV}" -p tcp --tcp-flags FIN FIN -j "${CH_FIN}"
+\$IPT -C "${CH_DEV}" -p tcp --tcp-flags FIN FIN -m conntrack --ctstate INVALID,NEW -j DROP 2>/dev/null || \
+  ipt_before_return "${CH_DEV}" -p tcp --tcp-flags FIN FIN -m conntrack --ctstate INVALID,NEW -j DROP
 
-\$IPT -C "${CH_DEV}" -p tcp --tcp-flags RST RST -j "${CH_RST}" 2>/dev/null || \
-  ipt_before_return "${CH_DEV}" -p tcp --tcp-flags RST RST -j "${CH_RST}"
+\$IPT -C "${CH_DEV}" -p tcp --tcp-flags FIN FIN -m conntrack --ctstate ESTABLISHED -j "${CH_FIN}" 2>/dev/null || \
+  ipt_before_return "${CH_DEV}" -p tcp --tcp-flags FIN FIN -m conntrack --ctstate ESTABLISHED -j "${CH_FIN}"
+
+\$IPT -C "${CH_DEV}" -p tcp --tcp-flags RST RST -m conntrack --ctstate INVALID,NEW -j DROP 2>/dev/null || \
+  ipt_before_return "${CH_DEV}" -p tcp --tcp-flags RST RST -m conntrack --ctstate INVALID,NEW -j DROP
+
+\$IPT -C "${CH_DEV}" -p tcp --tcp-flags RST RST -m conntrack --ctstate ESTABLISHED -j "${CH_RST}" 2>/dev/null || \
+  ipt_before_return "${CH_DEV}" -p tcp --tcp-flags RST RST -m conntrack --ctstate ESTABLISHED -j "${CH_RST}"
 
 ensure_chain_return "${CH_DEV}"
 EOF
@@ -261,11 +273,11 @@ fi
 # ----------------------------
 if [ -n "$FIN_RATE" ] && [ -n "$FIN_BURST" ]; then
 cat >> "$HOOK_FILE" <<EOF
-# FIN rate limit
-\$IPT -C "${CH_FIN}" -p tcp --tcp-flags FIN FIN -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
+# FIN rate limit for established connections
+\$IPT -C "${CH_FIN}" -p tcp --tcp-flags FIN FIN -m conntrack --ctstate ESTABLISHED -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
   -m hashlimit --hashlimit-above ${FIN_RATE}/second --hashlimit-burst ${FIN_BURST} \
   --hashlimit-mode srcip,dstport --hashlimit-name ${HL_FIN} -j DROP 2>/dev/null || \
-  ipt_before_return "${CH_FIN}" -p tcp --tcp-flags FIN FIN -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
+  ipt_before_return "${CH_FIN}" -p tcp --tcp-flags FIN FIN -m conntrack --ctstate ESTABLISHED -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
   -m hashlimit --hashlimit-above ${FIN_RATE}/second --hashlimit-burst ${FIN_BURST} \
   --hashlimit-mode srcip,dstport --hashlimit-name ${HL_FIN} -j DROP
 ensure_chain_return "${CH_FIN}"
@@ -281,11 +293,11 @@ fi
 # ----------------------------
 if [ -n "$RST_RATE" ] && [ -n "$RST_BURST" ]; then
 cat >> "$HOOK_FILE" <<EOF
-# RST rate limit
-\$IPT -C "${CH_RST}" -p tcp --tcp-flags RST RST -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
+# RST rate limit for established connections
+\$IPT -C "${CH_RST}" -p tcp --tcp-flags RST RST -m conntrack --ctstate ESTABLISHED -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
   -m hashlimit --hashlimit-above ${RST_RATE}/second --hashlimit-burst ${RST_BURST} \
   --hashlimit-mode srcip,dstport --hashlimit-name ${HL_RST} -j DROP 2>/dev/null || \
-  ipt_before_return "${CH_RST}" -p tcp --tcp-flags RST RST -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
+  ipt_before_return "${CH_RST}" -p tcp --tcp-flags RST RST -m conntrack --ctstate ESTABLISHED -s ${SRC_IP} -d ${DEST_IP} --dport ${DEST_PORT} \
   -m hashlimit --hashlimit-above ${RST_RATE}/second --hashlimit-burst ${RST_BURST} \
   --hashlimit-mode srcip,dstport --hashlimit-name ${HL_RST} -j DROP
 ensure_chain_return "${CH_RST}"
