@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
@@ -26,6 +27,41 @@
 #include "oms_utils.h"
 #include "mudparser.h"
 
+
+/* Keep these bounds consistent with the extension YANG leaf ranges.
+ * Positive uint32 thresholds are accepted; zero is not a disabling value.
+ * These are data-model bounds, not a guarantee of firewall support.
+ */
+#define EXTENSION_THRESHOLD_MIN 1LL
+#define EXTENSION_THRESHOLD_MAX 4294967295LL
+
+static int is_extension_field(const char *key) {
+    return !strcmp(key, UDP_PACKETRATE) || !strcmp(key, UDP_BURSTRATE) ||
+           !strcmp(key, SYN_PACKETRATE) || !strcmp(key, SYN_BURSTRATE) ||
+           !strcmp(key, FIN_PACKETRATE) || !strcmp(key, FIN_BURSTRATE) ||
+           !strcmp(key, RST_PACKETRATE) || !strcmp(key, RST_BURSTRATE);
+}
+
+/* Validate the original JSON type before converting to existing char * storage.
+ * NULL marks an unavailable value for the rule generator's pair checks.
+ */
+static char *parse_extension_threshold(const char *key, json_object *val) {
+    int64_t value;
+
+    if (!val || json_object_get_type(val) != json_type_int) {
+        fprintf(stderr, "osMUD: ignoring extension %s: expected a JSON integer\n", key);
+        return NULL;
+    }
+
+    value = json_object_get_int64(val);
+    if (value < EXTENSION_THRESHOLD_MIN || value > EXTENSION_THRESHOLD_MAX) {
+        fprintf(stderr, "osMUD: ignoring extension %s: integer outside %lld..%lld\n",
+                key, EXTENSION_THRESHOLD_MIN, EXTENSION_THRESHOLD_MAX);
+        return NULL;
+    }
+
+    return copystring(json_object_get_string(val));
+}
 
 AclEntry *getMudFileAcl(char *aclName, MudFileInfo *mudFile) {
 	int i;
@@ -90,6 +126,7 @@ void process_string(char *key, json_object *val, char *context, MudFileInfo *mfi
                 mfi->acls[mfi->aclListCount-1].aclType= copystring(json_object_get_string(val));
             }
         } else if (!strcmp(key, PROTOCOL)) {
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].aceType = PROTOCOLS;
             mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].protocol = copystring(json_object_get_string(val));
         } else if (!strcmp(key, DNS_NAME_SRC)) {  // TODO: There should never be both a SRC and DST DNS-NAME in the same object
             mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].aceType = ACLDNS;
@@ -115,24 +152,25 @@ void process_string(char *key, json_object *val, char *context, MudFileInfo *mfi
             mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].ruleName = copystring(json_object_get_string(val));
 */
         }
-		// Add SYN protection and SYN rate extension
+        // Recognised extension values are validated before storage.
         else if (!strcmp(key, UDP_PACKETRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpRate = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpRate = parse_extension_threshold(key, val);
         } else if (!strcmp(key, UDP_BURSTRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpBurst = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].udpBurst = parse_extension_threshold(key, val);
         } else if (!strcmp(key, SYN_PACKETRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synRate = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synRate = parse_extension_threshold(key, val);
         } else if (!strcmp(key, SYN_BURSTRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synBurst = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].synBurst = parse_extension_threshold(key, val);
         } else if (!strcmp(key, FIN_PACKETRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].finRate = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].finRate = parse_extension_threshold(key, val);
         } else if (!strcmp(key, FIN_BURSTRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].finBurst = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].finBurst = parse_extension_threshold(key, val);
         } else if (!strcmp(key, RST_PACKETRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].rstRate = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].rstRate = parse_extension_threshold(key, val);
         } else if (!strcmp(key, RST_BURSTRATE)) {
-            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].rstBurst = copystring(json_object_get_string(val));
+            mfi->acls[mfi->aclListCount-1].aceList[mfi->acls[mfi->aclListCount-1].aceCount-1].rstBurst = parse_extension_threshold(key, val);
         }
+
 #ifdef DEBUG_OSMUD
         else {
             printf("in final else in mud-info strings\n");
@@ -161,6 +199,21 @@ void processJson(json_object *jobj, char *context, int level, int state, MudFile
 #ifdef DEBUG_OSMUD
         printf("Level: %d, State: %d, Context: %s, key=%s value = %s\n", level, state, context, key, json_object_get_string(val));
 #endif
+        /* Handle extension keys before type dispatch so malformed null,
+         * object and array values cannot bypass validation or be traversed.
+         */
+        if (is_extension_field(key)) {
+            if (state != ACES_STATE || mfi->aclListCount <= 0 ||
+                mfi->aclListCount > MAX_ACLS ||
+                mfi->acls[mfi->aclListCount-1].aceCount <= 0 ||
+                mfi->acls[mfi->aclListCount-1].aceCount > MAX_ACES) {
+                fprintf(stderr, "osMUD: ignoring extension %s outside an ACE\n", key);
+                continue;
+            }
+            process_string(key, val, context, mfi, state);
+            continue;
+        }
+
         type = json_object_get_type(val);
         switch (type) {
             case json_type_null:
@@ -274,7 +327,7 @@ void freeMudFileInfo(MudFileInfo *mfi) {
             safe_free(mfi->acls[i].aceList[j].protocol);
             safe_free(mfi->acls[i].aceList[j].ruleName);
             safe_free(mfi->acls[i].aceList[j].upperPort);
-			// new field for proposed extension 
+            // new field for proposed extension 
             safe_free(mfi->acls[i].aceList[j].udpRate);
             safe_free(mfi->acls[i].aceList[j].udpBurst);
             safe_free(mfi->acls[i].aceList[j].synRate);
@@ -333,7 +386,7 @@ MudFileInfo *createMfi() {
             mfi->acls[i].aceList[j].protocol = (char *)0;
             mfi->acls[i].aceList[j].ruleName = (char *)0;
             mfi->acls[i].aceList[j].upperPort = (char *)0;
-			 // new field for proposed extension
+            // new field for proposed extension
             mfi->acls[i].aceList[j].udpRate = (char *)0;
             mfi->acls[i].aceList[j].udpBurst = (char *)0;
             mfi->acls[i].aceList[j].synRate = (char *)0;

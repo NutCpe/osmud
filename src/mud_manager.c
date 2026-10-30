@@ -13,6 +13,13 @@
  * limitations under the License.
  */
 
+ /* 
+ 	osMUD enforcement overview process can be explain as follows:
+ 	- Process and enforce "from-access" ACLs
+	- Process and enforce "to-access" ACLs
+	- Install default rules to block other traffic unless allow by MUD
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -70,6 +77,38 @@ int buildPortRange(char *portBuf, int portBufSize, AceEntry *ace)
 
 #define PORT_BUF_SIZE 512
 
+/* TCP pairs are independent: any complete pair enables TCP extensions. */
+static int hasCompleteTcpExtensions(const AceEntry *ace)
+{
+    return (ace->synRate && ace->synBurst) ||
+           (ace->finRate && ace->finBurst) ||
+           (ace->rstRate && ace->rstBurst);
+}
+
+/* Apply to a local ACE copy so incomplete pairs are omitted without
+ * changing the parsed MUD profile or disabling other complete pairs.
+ */
+static void omitIncompleteTcpPairs(AceEntry *ace)
+{
+    if (!ace->synRate || !ace->synBurst) {
+        ace->synRate = NULL;
+        ace->synBurst = NULL;
+    }
+    if (!ace->finRate || !ace->finBurst) {
+        ace->finRate = NULL;
+        ace->finBurst = NULL;
+    }
+    if (!ace->rstRate || !ace->rstBurst) {
+        ace->rstRate = NULL;
+        ace->rstBurst = NULL;
+    }
+}
+
+static int hasCompleteUdpExtensions(const AceEntry *ace)
+{
+    return ace->udpRate && ace->udpBurst;
+}
+
 int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *event) {
 	int retval = 0;
 	int actionResult = 0;
@@ -87,34 +126,39 @@ int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *ev
     		logOmsGeneralMessage(OMS_INFO, OMS_SUBSYS_DEVICE_INTERFACE, "Applying *from* dns ace rule.");
 
     		dnsInfo = resolveDnsEntryToIp(acl->aceList[i].dnsName);
+				if (!dnsInfo) {
+					// To avoid segfault, when dns is not able to resolve the address the rule is skipped
+					continue;
+				}
 
-    		// Need to check a return code to make sure the rule got applied correctly
-    		installDnsRule(dnsInfo->domainName, event->ipAddress, event->macAddress, event->hostName, dnsWhiteListFile);
+				for (j = 0; j < dnsInfo->ipCount; j++) {
+					buildPortRange(portRangeBuffer, PORT_BUF_SIZE, &(acl->aceList[i]));
 
-    		// Need to install a firewall rule for each IP that resolves
-    		for (j = 0; j < dnsInfo->ipCount; j++) {
-    			buildPortRange(portRangeBuffer, PORT_BUF_SIZE, &(acl->aceList[i]));
+					if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "6") &&
+                        hasCompleteTcpExtensions(&acl->aceList[i])) {
+                        AceEntry tcpAce = acl->aceList[i];
+                        omitIncompleteTcpPairs(&tcpAce);
 
-				if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "6")) {				
+						
 						// Process TCP ACEs
 						// Detect newly added extensions
-						if (acl->aceList[i].synRate) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synRate);
+						if (tcpAce.synRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.synRate);
 						}
-						if (acl->aceList[i].synBurst) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synBurst);
+						if (tcpAce.synBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.synBurst);
 						}
-						if (acl->aceList[i].finRate) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finRate);
+						if (tcpAce.finRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.finRate);
 						}
-						if (acl->aceList[i].finBurst) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finBurst);
+						if (tcpAce.finBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.finBurst);
 						}
-						if (acl->aceList[i].rstRate) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstRate);
+						if (tcpAce.rstRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.rstRate);
 						}
-						if (acl->aceList[i].rstBurst) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstBurst);
+						if (tcpAce.rstBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.rstBurst);
 						}
 					
 						// Call "installFirewallTCPRule" helper function to Enforced TCP ACL rules
@@ -126,17 +170,18 @@ int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *ev
 																LAN_DEVICE_NAME,					/* srcDevice - lan or wan */
 																WAN_DEVICE_NAME,					/* destDevice - lan or wan */
 																acl->aceList[i].protocol,			/* protocol - tcp */
-																acl->aceList[i].synRate,			/* synRate */
-																acl->aceList[i].synBurst,			/* synBurst */
-																acl->aceList[i].finRate,			/* finRate */
-																acl->aceList[i].finBurst,			/* finBurst */
-																acl->aceList[i].rstRate,			/* rstRate */
-																acl->aceList[i].rstBurst,			/* rstBurst */
+																tcpAce.synRate,			/* synRate */
+																tcpAce.synBurst,			/* synBurst */
+																tcpAce.finRate,			/* finRate */
+																tcpAce.finBurst,			/* finBurst */
+																tcpAce.rstRate,			/* rstRate */
+																tcpAce.rstBurst,			/* rstBurst */
 																acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
 																acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
 																aclType, event->hostName			/* hostname of the new device */
 																);						
-					} else if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "17")) {
+					} else if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "17") &&
+                               hasCompleteUdpExtensions(&acl->aceList[i])) {
 						// Process UDP ACEs
 						// Detect newly added extensions
 						if(acl->aceList[i].udpRate) {  // Packet rate extension
@@ -161,9 +206,9 @@ int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *ev
 																acl->aceList[i].actionsForwarding, 	/* ACCEPT or REJECT */
 																aclType, event->hostName			/* hostname of the new device */);
 					} else {
-						// Non-TCP or UDP ACEs
-						// Currently, profile extension on non-TCP/UDP profile is not the focus (but can be included later)
-						// Shell script for UCP ACL rules enforcement = "create_ip_fw_rule.sh"
+						// Baseline rules: no complete applicable extension pair,
+						// or a protocol other than TCP/UDP.
+						// Shell script = "create_ip_fw_rule.sh"
 						actionResult = installFirewallIPRule(event->ipAddress,						/* srcIP */
 																dnsInfo->ipList[j],					/* destIP */
 																portRangeBuffer,					/* destport */
@@ -174,23 +219,19 @@ int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *ev
 																acl->aceList[i].actionsForwarding, 	/* ACCEPT or REJECT */
 																aclType, event->hostName			/* hostname of the new device */);
 					}
-				if (actionResult) {
-					logOmsGeneralMessage(OMS_CRIT, OMS_SUBSYS_DEVICE_INTERFACE, "Firewall rule installation failed");
-					actionResult = 0;
-					retval = 1; /* Set flag to indicate at least one firewall rule installation failed */
+					if(actionResult) {
+						logOmsGeneralMessage(OMS_CRIT, OMS_SUBSYS_DEVICE_INTERFACE, "Firewall rule installation failed");
+						retval = 1;
+					}
 				}
-    		}
-
-    		freeDnsInfo(dnsInfo);
-		} else {
-    		logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_DEVICE_INTERFACE, "Ignoring unimplemented *from* ace rule.");
-    		/* retval = 1;  -- right now, do not fail entire transaction for non-implemented MUD actions * It's an error situation */
+				freeDnsInfo(dnsInfo);
+			} else {
+				logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_DEVICE_INTERFACE, "Ignoring unimplemented *from* ace rule.");
+			}
 		}
-	}
-
+		
 	return retval;
 }
-
 
 int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *event) {
 	int retval = 0;
@@ -209,6 +250,10 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
     		logOmsGeneralMessage(OMS_INFO, OMS_SUBSYS_DEVICE_INTERFACE, "Applying *to* dns ace rule.");
 
     		dnsInfo = resolveDnsEntryToIp(acl->aceList[i].dnsName);
+			if (!dnsInfo) {
+				// To avoid segfault, when dns is not able to resolve the address the rule is skipped
+				continue;
+			}
 
     		// Need to check a return code to make sure the rule got applied correctly
     		installDnsRule(dnsInfo->domainName, event->ipAddress, event->macAddress, event->hostName, dnsWhiteListFile);
@@ -216,27 +261,32 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
     		// Need to install a firewall rule for each IP that resolves
     		for (j = 0; j < dnsInfo->ipCount; j++) {
     			buildPortRange(portRangeBuffer, PORT_BUF_SIZE, &(acl->aceList[i]));
-				if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "6")) {
+
+				if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "6") &&
+                        hasCompleteTcpExtensions(&acl->aceList[i])) {
+                        AceEntry tcpAce = acl->aceList[i];
+                        omitIncompleteTcpPairs(&tcpAce);
+
 
 					// Process TCP ACEs
 						// Detect newly added extensions
-						if (acl->aceList[i].synRate) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synRate);
+						if (tcpAce.synRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.synRate);
 						}
-						if (acl->aceList[i].synBurst) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].synBurst);
+						if (tcpAce.synBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.synBurst);
 						}
-						if (acl->aceList[i].finRate) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finRate);
+						if (tcpAce.finRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.finRate);
 						}
-						if (acl->aceList[i].finBurst) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].finBurst);
+						if (tcpAce.finBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.finBurst);
 						}
-						if (acl->aceList[i].rstRate) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstRate);
+						if (tcpAce.rstRate) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.rstRate);
 						}
-						if (acl->aceList[i].rstBurst) {
-							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].rstBurst);
+						if (tcpAce.rstBurst) {
+							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, tcpAce.rstBurst);
 						}
 					
 						// Call "installFirewallTCPRule" helper function to Enforced TCP ACL rules
@@ -248,17 +298,18 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
 																WAN_DEVICE_NAME,					/* srcDevice - lan or wan */
 																LAN_DEVICE_NAME,					/* destDevice - lan or wan */
 																acl->aceList[i].protocol,			/* protocol - tcp */
-																acl->aceList[i].synRate,			/* synRate */
-																acl->aceList[i].synBurst,			/* synBurst */
-																acl->aceList[i].finRate,			/* finRate */
-																acl->aceList[i].finBurst,			/* finBurst */
-																acl->aceList[i].rstRate,			/* rstRate */
-																acl->aceList[i].rstBurst,			/* rstBurst */
+																tcpAce.synRate,			/* synRate */
+																tcpAce.synBurst,			/* synBurst */
+																tcpAce.finRate,			/* finRate */
+																tcpAce.finBurst,			/* finBurst */
+																tcpAce.rstRate,			/* rstRate */
+																tcpAce.rstBurst,			/* rstBurst */
 																acl->aceList[i].ruleName,			/* the name of the rule -- TODO: Better rule names by device name */
 																acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
 																aclType, event->hostName			/* hostname of the new device */
 																);						
-					} else if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "17")) {
+					} else if (acl->aceList[i].protocol && !strcmp(acl->aceList[i].protocol, "17") &&
+                               hasCompleteUdpExtensions(&acl->aceList[i])) {
 						if(acl->aceList[i].udpRate) {  // Packet rate extension
 							logOmsGeneralMessage(OMS_DEBUG, OMS_SUBSYS_DEVICE_INTERFACE, acl->aceList[i].udpRate);
 						}
@@ -278,7 +329,8 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
 															acl->aceList[i].actionsForwarding,	/* ACCEPT or REJECT */
 															aclType, event->hostName			/* hostname of the new device */ );
 				} else {
-					// Install non-TCP/UDP "to-access" ACL rules
+					// Install baseline rules when no applicable pair is complete,
+					// or the protocol is neither TCP nor UDP.
 					actionResult = installFirewallIPRule(event->ipAddress,						/* srcIP */
 															dnsInfo->ipList[j],					/* destIP */
 															portRangeBuffer,					/* destport */
@@ -294,15 +346,13 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
 					actionResult = 0;
 					retval = 1; /* Set flag to indicate at least one firewall rule installation failed */
 				}
-    		}
-
-    		freeDnsInfo(dnsInfo);
+			}
+			freeDnsInfo(dnsInfo);
 		} else {
-    		logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_DEVICE_INTERFACE, "Ignoring unimplemented *to* ace rule.");
+			logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_DEVICE_INTERFACE, "Ignoring unimplemented *to* ace rule.");
     		/* retval = 1;  -- right now, do not fail entire transaction for non-implemented MUD actions * It's an error situation */
 		}
 	}
-
 	return retval;
 }
 
@@ -394,15 +444,15 @@ int executeMudWithDhcpContext(DhcpEvent *dhcpEvent)
 				retval = 1;
 			}
 
-		    // Install default rule to block all traffic from this IP address unless allowed in the MUD file
+			// Install non-TCP/UDP default rule to block all traffic from this IP address unless allowed in the MUD file
 		    // ORDER MATTERS - this rule needs to be installed after all of the individual allow/deny rules
 			actionResult = installFirewallIPRule(dhcpEvent->ipAddress, 		/* srcIp */
 													"any", 					/* destIp */
 													"any",		 			/* destPort */
 													LAN_DEVICE_NAME, 		/* srcDevice - lan or wan */
 													WAN_DEVICE_NAME,		/* destDevice - lan or wan */
-													"all", 					/* protocol - tcp/udp */
-													"REJECT-ALL", 			/* the name of the rule -- TODO: Better rule names by device name*/
+													"all", 					/* protocol - others */
+													"REJECT-NONTCPUDP",		/* the name of the rule -- TODO: Better rule names by device name*/
 													"DENY",					/* ACCEPT or DENY or REJECT */
 													"all",
 													dhcpEvent->hostName		/* hostname of the new device */ );
@@ -545,6 +595,12 @@ executeOpenMudDhcpAction(DhcpEvent *dhcpEvent)
 
 DomainResolutions *resolveDnsEntryToIp(char *hostname)
 {
+    char msg[256];
+
+    snprintf(msg, sizeof(msg),
+             "resolveDnsEntryToIp(): attempting to resolve '%s'", hostname);
+    logOmsGeneralMessage(OMS_INFO, OMS_SUBSYS_DEVICE_INTERFACE, msg);
+
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in *h;
     int rv;
@@ -554,24 +610,35 @@ DomainResolutions *resolveDnsEntryToIp(char *hostname)
     dnsRes->domainName = copystring(hostname);
 
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if ( (rv = getaddrinfo( hostname , "http" , &hints , &servinfo)) != 0)
+    rv = getaddrinfo(hostname, "http", &hints, &servinfo);
+    if (rv != 0)
     {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        snprintf(msg, sizeof(msg),
+                 "resolveDnsEntryToIp(): getaddrinfo('%s') FAILED: %s",
+                 hostname, gai_strerror(rv));
+        logOmsGeneralMessage(OMS_ERROR, OMS_SUBSYS_DEVICE_INTERFACE, msg);
+
+        free(dnsRes);
         return (DomainResolutions *)0;
     }
 
-    // loop through all the results and add each to the list
-    for(p = servinfo; p != NULL; p = p->ai_next)
+    int count = 0;
+    for (p = servinfo; p != NULL; p = p->ai_next)
     {
         h = (struct sockaddr_in *) p->ai_addr;
-        dnsRes->ipList[dnsRes->ipCount++] = copystring(inet_ntoa(h->sin_addr));
+        dnsRes->ipList[count++] = copystring(inet_ntoa(h->sin_addr));
     }
+    dnsRes->ipCount = count;
 
-    freeaddrinfo(servinfo); // all done with this structure
+    snprintf(msg, sizeof(msg),
+             "resolveDnsEntryToIp(): '%s' resolved to %d IPs",
+             hostname, count);
+    logOmsGeneralMessage(OMS_INFO, OMS_SUBSYS_DEVICE_INTERFACE, msg);
 
+    freeaddrinfo(servinfo);
     return dnsRes;
 }
 
