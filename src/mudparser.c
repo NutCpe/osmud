@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 
 #include "json-c/json.h"
+#include "oms_messages.h"
 #include "oms_utils.h"
 #include "mudparser.h"
 
@@ -47,16 +48,21 @@ static int is_extension_field(const char *key) {
  */
 static char *parse_extension_threshold(const char *key, json_object *val) {
     int64_t value;
+    char message[256];
 
     if (!val || json_object_get_type(val) != json_type_int) {
-        fprintf(stderr, "osMUD: ignoring extension %s: expected a JSON integer\n", key);
+        snprintf(message, sizeof(message),
+                 "Ignoring extension %s: expected a JSON integer.", key);
+        logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_MUD_FILE, message);
         return NULL;
     }
 
     value = json_object_get_int64(val);
     if (value < EXTENSION_THRESHOLD_MIN || value > EXTENSION_THRESHOLD_MAX) {
-        fprintf(stderr, "osMUD: ignoring extension %s: integer outside %lld..%lld\n",
-                key, EXTENSION_THRESHOLD_MIN, EXTENSION_THRESHOLD_MAX);
+        snprintf(message, sizeof(message),
+                 "Ignoring extension %s: integer outside %lld..%lld.",
+                 key, EXTENSION_THRESHOLD_MIN, EXTENSION_THRESHOLD_MAX);
+        logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_MUD_FILE, message);
         return NULL;
     }
 
@@ -207,7 +213,11 @@ void processJson(json_object *jobj, char *context, int level, int state, MudFile
                 mfi->aclListCount > MAX_ACLS ||
                 mfi->acls[mfi->aclListCount-1].aceCount <= 0 ||
                 mfi->acls[mfi->aclListCount-1].aceCount > MAX_ACES) {
-                fprintf(stderr, "osMUD: ignoring extension %s outside an ACE\n", key);
+                char message[256];
+
+                snprintf(message, sizeof(message),
+                         "Ignoring extension %s: outside an ACE.", key);
+                logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_MUD_FILE, message);
                 continue;
             }
             process_string(key, val, context, mfi, state);

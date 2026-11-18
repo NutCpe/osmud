@@ -109,6 +109,40 @@ static int hasCompleteUdpExtensions(const AceEntry *ace)
     return ace->udpRate && ace->udpBurst;
 }
 
+/* The parser reports invalid values and stores them as NULL. Warn when
+ * only one usable member remains, including when its partner was absent.
+ */
+static void warnIncompletePair(const char *ruleName, const char *constraint,
+                               const char *rate, const char *burst)
+{
+    char message[512];
+
+    if ((rate && burst) || (!rate && !burst)) {
+        return;
+    }
+
+    snprintf(message, sizeof(message),
+             "ACE '%.320s': %s rate limit omitted because %s is missing or invalid.",
+             ruleName ? ruleName : "(unnamed)", constraint,
+             rate ? "burst-rate" : "packet-rate");
+    logOmsGeneralMessage(OMS_WARN, OMS_SUBSYS_DEVICE_INTERFACE, message);
+}
+
+static void warnIncompleteExtensions(const AceEntry *ace)
+{
+    if (!ace->protocol) {
+        return;
+    }
+
+    if (strcmp(ace->protocol, "6") == 0) {
+        warnIncompletePair(ace->ruleName, "TCP SYN", ace->synRate, ace->synBurst);
+        warnIncompletePair(ace->ruleName, "TCP FIN", ace->finRate, ace->finBurst);
+        warnIncompletePair(ace->ruleName, "TCP RST", ace->rstRate, ace->rstBurst);
+    } else if (strcmp(ace->protocol, "17") == 0) {
+        warnIncompletePair(ace->ruleName, "UDP", ace->udpRate, ace->udpBurst);
+    }
+}
+
 int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *event) {
 	int retval = 0;
 	int actionResult = 0;
@@ -123,6 +157,7 @@ int processFromAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *ev
 
 	for (i = 0; i < acl->aceCount; i++) {
 		if (acl->aceList[i].aceType == ACLDNS) {
+			warnIncompleteExtensions(&acl->aceList[i]);
     		logOmsGeneralMessage(OMS_INFO, OMS_SUBSYS_DEVICE_INTERFACE, "Applying *from* dns ace rule.");
 
     		dnsInfo = resolveDnsEntryToIp(acl->aceList[i].dnsName);
@@ -247,6 +282,7 @@ int processToAccess(char *aclName, char *aclType, AclEntry *acl, DhcpEvent *even
 
 	for (i = 0; i < acl->aceCount; i++) {
 		if (acl->aceList[i].aceType == ACLDNS) {
+			warnIncompleteExtensions(&acl->aceList[i]);
     		logOmsGeneralMessage(OMS_INFO, OMS_SUBSYS_DEVICE_INTERFACE, "Applying *to* dns ace rule.");
 
     		dnsInfo = resolveDnsEntryToIp(acl->aceList[i].dnsName);
